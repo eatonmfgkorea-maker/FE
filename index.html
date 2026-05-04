@@ -647,6 +647,8 @@ function MFGProductionApp() {
           // settings 구성
           const loadedTCP = savedData.settings && savedData.settings.TCP ? savedData.settings.TCP : {};
           const loadedFE = savedData.settings && savedData.settings.FE ? savedData.settings.FE : {};
+          // 백업에 linkedLines가 없으면 현재 설정 유지 (사용자가 설정한 값 보존)
+          const preservedLinkedLines = loadedFE.linkedLines || (settings.FE && settings.FE.linkedLines) || [];
           const newSettings = {
             common: (savedData.settings && savedData.settings.common) ? savedData.settings.common : { downtimeTypes: [] },
             TCP: {
@@ -662,7 +664,7 @@ function MFGProductionApp() {
               items: loadedFE.items || [],
               defectTypes: loadedFE.defectTypes || [],
               defectCodes: loadedFE.defectCodes || defaultDefectCodes,
-              linkedLines: loadedFE.linkedLines || [] // 연결 라인 쌍 예: [['O/ICV', 'N/ICV']]
+              linkedLines: preservedLinkedLines // 연결 라인 쌍 보존
             }
           };
           
@@ -2892,6 +2894,8 @@ function MFGProductionApp() {
                         // settings 먼저 구성
                         const loadedTCP = data.settings && data.settings.TCP ? data.settings.TCP : {};
                         const loadedFE = data.settings && data.settings.FE ? data.settings.FE : {};
+                        // 백업에 linkedLines가 없으면 현재 설정 유지 (사용자가 설정한 값 보존)
+                        const preservedLinkedLines = loadedFE.linkedLines || (settings.FE && settings.FE.linkedLines) || [];
                         const newSettings = {
                           common: (data.settings && data.settings.common) ? data.settings.common : { downtimeTypes: [] },
                           TCP: {
@@ -2906,7 +2910,8 @@ function MFGProductionApp() {
                             lines: loadedFE.lines || [],
                             items: loadedFE.items || [],
                             defectTypes: loadedFE.defectTypes || [],
-                            defectCodes: loadedFE.defectCodes || defaultDefectCodes
+                            defectCodes: loadedFE.defectCodes || defaultDefectCodes,
+                            linkedLines: preservedLinkedLines
                           }
                         };
                         
@@ -14375,7 +14380,7 @@ function MFGProductionApp() {
 
       {/* Footer */}
       <footer className="bg-gray-800 text-gray-400 px-6 py-3 text-center text-sm flex-shrink-0">
-        FE 생산관리 시스템 © 2024
+        FE 생산관리 시스템 © 2026
       </footer>
     </div>
   );
