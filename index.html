@@ -3135,6 +3135,27 @@ function MFGProductionApp() {
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(data);
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    
+    // ★ 불량 다운로드 시 ES/이탈력 시트 추가 (생산일지의 esCount/deviationCount)
+    if (type === 'defect') {
+      const esData = filteredProdLogs
+        .filter(l => (l.esCount !== '' && l.esCount != null) || (l.deviationCount !== '' && l.deviationCount != null))
+        .map(l => ({
+          '일자': l.productionDate,
+          '라인': l.lineName,
+          '주야': l.shift,
+          '아이템': l.item || '',
+          'P/No': l.partNo || '',
+          'Lot No': l.lotNo || '',
+          'ES 개수': parseFloat(l.esCount) || 0,
+          '이탈력 개수': parseFloat(l.deviationCount) || 0
+        }));
+      if (esData.length > 0) {
+        const esWs = XLSX.utils.json_to_sheet(esData);
+        XLSX.utils.book_append_sheet(wb, esWs, 'ES_이탈력');
+      }
+    }
+    
     const filename = `${activeSection}_${sheetName}_${startDate}_${endDate}.xlsx`;
     XLSX.writeFile(wb, filename);
     setExportModalType(null);
