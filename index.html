@@ -3230,18 +3230,44 @@ function MFGProductionApp() {
     
     // ★ 불량 다운로드 시 ES/이탈력 시트 추가 (생산일지의 esCount/deviationCount)
     if (type === 'defect') {
-      const esData = filteredProdLogs
+      // 이탈력 아이템별 BOM 매핑 (이탈력일 때 Part No 자리에 각 BOM, 수량 = 이탈력 개수)
+      const deviationBomMap = {
+        'T300 GAMMA': ['19059(END PLATE)', '20688(HOUSING)', '20706(ORIFICE PLATE)'],
+        'MEMBRANE VALVE': ['626617(TOP CAP)', '626618(ICE SHIELD)', '626619(MEMBRANE)']
+      };
+      const esData = [];
+      filteredProdLogs
         .filter(l => (l.esCount !== '' && l.esCount != null) || (l.deviationCount !== '' && l.deviationCount != null))
-        .map(l => ({
-          '일자': l.productionDate,
-          '라인': l.lineName,
-          '주야': l.shift,
-          '아이템': l.item || '',
-          'P/No': l.partNo || '',
-          'Lot No': l.lotNo || '',
-          'ES 개수': parseFloat(l.esCount) || 0,
-          '이탈력 개수': parseFloat(l.deviationCount) || 0
-        }));
+        .forEach(l => {
+          const es = parseFloat(l.esCount) || 0;
+          const dev = parseFloat(l.deviationCount) || 0;
+          const itemStr = l.item || '';
+          const baseInfo = {
+            '일자': l.productionDate,
+            '라인': l.lineName,
+            '주야': l.shift,
+            '아이템': itemStr
+          };
+          // ES: Part No = 해당 아이템의 Part No, 수량 = ES 개수
+          if (es > 0) {
+            esData.push({ ...baseInfo, '구분': 'ES', 'Part No': l.partNo || '', '수량': es, 'Lot No': l.lotNo || '' });
+          }
+          // 이탈력: Part No = 내가 지정한 BOM, 수량 = 이탈력 개수 (BOM 3종류 행 분리)
+          if (dev > 0) {
+            let bomList = null;
+            for (const key in deviationBomMap) {
+              if (itemStr.includes(key)) { bomList = deviationBomMap[key]; break; }
+            }
+            if (bomList) {
+              bomList.forEach(bom => {
+                esData.push({ ...baseInfo, '구분': '이탈력', 'Part No': bom, '수량': dev, 'Lot No': l.lotNo || '' });
+              });
+            } else {
+              // 매핑 안 되는 아이템이면 Part No = 아이템 Part No 그대로
+              esData.push({ ...baseInfo, '구분': '이탈력', 'Part No': l.partNo || '', '수량': dev, 'Lot No': l.lotNo || '' });
+            }
+          }
+        });
       if (esData.length > 0) {
         const esWs = XLSX.utils.json_to_sheet(esData);
         XLSX.utils.book_append_sheet(wb, esWs, 'ES_이탈력');
