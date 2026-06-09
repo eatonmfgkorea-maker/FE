@@ -5583,6 +5583,16 @@ function MFGProductionApp() {
                   && (!viewDowntimeFilter.category || d.downtimeCategory === viewDowntimeFilter.category)
                   && (!viewDowntimeFilter.downtimeType || d.downtimeType === viewDowntimeFilter.downtimeType);
               });
+              // 날짜 → 시작시간 순 정렬
+              allLogs.sort((a, b) => {
+                const pa = getProductionLogById(a.productionLogId);
+                const pb = getProductionLogById(b.productionLogId);
+                const da = (pa && pa.productionDate) || '';
+                const db = (pb && pb.productionDate) || '';
+                if (da !== db) return da.localeCompare(db);
+                const toMin = (t) => { if (!t) return 0; const p = String(t).split(':'); return (Number(p[0]) || 0) * 60 + (Number(p[1]) || 0); };
+                return toMin(a.startTime) - toMin(b.startTime);
+              });
               const hasActiveFilter = viewDowntimeFilter.lineName || viewDowntimeFilter.partNo || viewDowntimeFilter.item || viewDowntimeFilter.category || viewDowntimeFilter.downtimeType;
               
               return (
@@ -7717,7 +7727,7 @@ function MFGProductionApp() {
                       {downtimeLogs.filter(d => d.productionLogId === selectedLogId).length === 0 ? (
                         <tr><td colSpan="6" className="px-4 py-6 text-center text-gray-400">등록된 비가동 내역이 없습니다.</td></tr>
                       ) : (
-                        downtimeLogs.filter(d => d.productionLogId === selectedLogId).map(log => (
+                        [...downtimeLogs.filter(d => d.productionLogId === selectedLogId)].sort((a, b) => { const toMin = (t) => { if (!t) return 0; const p = String(t).split(':'); return (Number(p[0]) || 0) * 60 + (Number(p[1]) || 0); }; return toMin(a.startTime) - toMin(b.startTime); }).map(log => (
                           <tr key={log.id} className="hover:bg-gray-50">
                             <td className="px-3 py-2 text-sm border-b text-center">
                               <span className={`px-2 py-1 rounded text-xs ${
@@ -8599,9 +8609,9 @@ function MFGProductionApp() {
           }).sort((a, b) => b.productionDate.localeCompare(a.productionDate) || b.id - a.id);
           
           // 라인 목록
-          const lineOptions = settings.TCP.lines.map(l => l.name);
+          const lineOptions = settings.FE.lines.map(l => l.name);
           // 아이템 목록
-          const itemOptions = settings.TCP.items.map(i => i.item);
+          const itemOptions = settings.FE.items.map(i => i.item);
           
           return (
           <div className="bg-white rounded-xl shadow-lg p-6">
@@ -9089,11 +9099,11 @@ function MFGProductionApp() {
                           </div>
                         </div>
                         
-                        {/* TCP 라인별 목표 */}
+                        {/* 라인별 목표 */}
                         <div>
                           <div className="text-sm font-medium text-gray-600 mb-2">라인별 목표</div>
                           <div className="space-y-2">
-                            {settings.TCP.lines.map(line => (
+                            {settings.FE.lines.map(line => (
                               <div key={line.name} className="flex items-center gap-4 p-2 bg-gray-50 rounded-lg">
                                 <span className="text-sm text-gray-700 flex-1">{line.name}</span>
                                 <div className="flex items-center gap-2">
@@ -13392,7 +13402,7 @@ function MFGProductionApp() {
                     
                     // TCP 라인 내보내기
                     const tcpLineHeaders = ['라인명', 'Station(콤마구분)'];
-                    const tcpLineData = [tcpLineHeaders, ...settings.TCP.lines.map(line => [
+                    const tcpLineData = [tcpLineHeaders, ...settings.FE.lines.map(line => [
                       line.name,
                       line.stations.join(',')
                     ])];
@@ -13404,7 +13414,7 @@ function MFGProductionApp() {
                     
                     // TCP 아이템 내보내기
                     const tcpItemHeaders = ['아이템명', '라인명', 'Part No(콤마구분)'];
-                    const tcpItemData = [tcpItemHeaders, ...settings.TCP.items.map(item => [
+                    const tcpItemData = [tcpItemHeaders, ...settings.FE.items.map(item => [
                       item.item,
                       item.lineName || '',
                       item.partNos.map(p => p.partNo).join(',')
@@ -13418,7 +13428,7 @@ function MFGProductionApp() {
                     // TCP BOM 내보내기
                     const tcpBomHeaders = ['아이템명', 'Part No', 'BOM명', '품명', '수량'];
                     const tcpBomData = [tcpBomHeaders];
-                    settings.TCP.items.forEach(item => {
+                    settings.FE.items.forEach(item => {
                       item.partNos.forEach(pn => {
                         if (pn.bom && pn.bom.length > 0) {
                           pn.bom.forEach(b => {
@@ -13436,7 +13446,7 @@ function MFGProductionApp() {
                     // TCP CT 내보내기
                     const tcpCtHeaders = ['아이템명', '인원수', '시작일', '종료일', '기본수량', '계획수량', 'OEE제외여부(Y/N)'];
                     const tcpCtData = [tcpCtHeaders];
-                    settings.TCP.items.forEach(item => {
+                    settings.FE.items.forEach(item => {
                       if (item.ct && item.ct.length > 0) {
                         item.ct.forEach(ct => {
                           tcpCtData.push([
@@ -13468,7 +13478,7 @@ function MFGProductionApp() {
                     // TCP 불량종류 내보내기
                     const defectTypeHeaders = ['라인명', 'Station', '대분류', '소분류', 'FTFR포함(Y/N)', 'OEE포함(Y/N)'];
                     const defectTypeData = [defectTypeHeaders];
-                    settings.TCP.defectTypes.forEach(dt => {
+                    settings.FE.defectTypes.forEach(dt => {
                       if (dt.subTypes && dt.subTypes.length > 0) {
                         dt.subTypes.forEach(st => {
                           defectTypeData.push([
@@ -13490,7 +13500,7 @@ function MFGProductionApp() {
                     
                     // TCP 불량코드 내보내기
                     const defectCodeHeaders = ['불량코드'];
-                    const defectCodeData = [defectCodeHeaders, ...(settings.TCP.defectCodes || []).map(code => [code])];
+                    const defectCodeData = [defectCodeHeaders, ...(settings.FE.defectCodes || []).map(code => [code])];
                     const defectCodeWs = XLSX.utils.aoa_to_sheet(defectCodeData);
                     defectCodeWs['!cols'] = [{ wch: 30 }];
                     XLSX.utils.book_append_sheet(wb, defectCodeWs, 'FE_불량코드');
