@@ -2478,6 +2478,7 @@ function MFGProductionApp() {
     setPlanLoading(true);
     setPlanMsg('생산계획을 불러오는 중...');
     setPlanDraft(null);
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbxLFrxbAaBt1bBa3SUdDY9wY48tvt85mEDaj3tiKhyw_R7oJCC9GbOWLfWbdSohnQtB/exec';
     try {
       const listRes = await fetch(GAS_URL + '?action=list&_=' + Date.now());
       const list = await listRes.json();
@@ -2535,9 +2536,17 @@ function MFGProductionApp() {
         } else if (cands.length > 1) {
           partOptions = [];   // 여러 개면 비워서 직접 선택
         }
+        // 이미 입력된 생산일지와 겹치면 기본 해제 (같은 날짜·주야·라인·품번)
+        const already = productionLogs.some(l =>
+          l.section === activeSection &&
+          l.productionDate === planPickDate &&
+          l.shift === r.shift &&
+          (lineName ? l.lineName === lineName : true) &&
+          __normPno(l.partNo) === __normPno(r.pno));
         return {
           key: 'p' + idx,
-          use: cands.length === 1,
+          already: already,
+          use: cands.length === 1 && !already,
           productionDate: planPickDate,
           lineName, item, partNo, partOptions,
           planLine: r.line, planName: r.pname,
@@ -2551,7 +2560,10 @@ function MFGProductionApp() {
       });
       setPlanDraft(draft);
       const okN = draft.filter(d => d.matched).length;
-      setPlanMsg(`계획 ${draft.length}건 · 자동 매칭 ${okN}건` + (draft.length - okN ? ` · 확인 필요 ${draft.length - okN}건` : ''));
+      const dupN = draft.filter(d => d.already).length;
+      setPlanMsg(`계획 ${draft.length}건 · 자동 매칭 ${okN}건`
+        + (draft.length - okN ? ` · 확인 필요 ${draft.length - okN}건` : '')
+        + (dupN ? ` · 이미 입력됨 ${dupN}건(자동 제외)` : ''));
     } catch (e) {
       setPlanMsg('불러오기 실패: ' + (e.message || e));
     }
@@ -4200,9 +4212,12 @@ function MFGProductionApp() {
       React.createElement("div", { className: "flex gap-2" },
         React.createElement("button", {
           type: "button",
-          onClick: () => setPlanDraft(prev => prev.map(d => ({ ...d, use: true }))),
+          onClick: () => setPlanDraft(prev => {
+            const allOn = prev.filter(d => !d.already).every(d => d.use);
+            return prev.map(d => ({ ...d, use: d.already ? d.use : !allOn }));
+          }),
           className: "px-3 py-1.5 bg-white border border-indigo-300 text-indigo-700 rounded-lg text-xs font-bold"
-        }, "전체 선택"),
+        }, "전체 선택/해제"),
         React.createElement("button", {
           type: "button",
           onClick: () => setPlanDraft(null),
@@ -4216,15 +4231,15 @@ function MFGProductionApp() {
       React.createElement("div", { className: "overflow-x-auto max-h-96" },
         React.createElement("table", { className: "w-full text-xs" },
           React.createElement("thead", { className: "bg-gray-50 sticky top-0" },
-            React.createElement("tr", null, ["", "주야", "라인명", "아이템", "Part No", "Lot No", "인원", "양품수량", "계획"].map(h =>
-              React.createElement("th", { key: h, className: "px-2 py-2 font-bold text-gray-600 whitespace-nowrap border-b" }, h)))),
+            React.createElement("tr", null, ["", "주야", "라인명", "아이템", "Part No", "Lot No", "인원", "양품수량", "계획", ""].map((h, hi) =>
+              React.createElement("th", { key: hi, className: "px-2 py-2 font-bold text-gray-600 whitespace-nowrap border-b" }, h)))),
           React.createElement("tbody", null, planDraft.map(d => {
             const secItems = (settings[activeSection] && settings[activeSection].items) || [];
             const lineOpts = [...new Set(secItems.map(it => it.lineName))].filter(Boolean).sort();
             const itemOpts = secItems.filter(it => it.lineName === d.lineName).map(it => it.item);
             return React.createElement("tr", {
               key: d.key,
-              className: "border-b " + (d.use ? (d.matched ? "" : "bg-amber-50") : "opacity-40 bg-gray-50")
+              className: "border-b " + (d.use ? (d.matched ? "" : "bg-amber-50") : (d.already ? "opacity-50 bg-emerald-50" : "opacity-40 bg-gray-50"))
             }, React.createElement("td", { className: "px-2 py-1 text-center" },
               React.createElement("input", {
                 type: "checkbox", checked: d.use,
@@ -4280,11 +4295,20 @@ function MFGProductionApp() {
                   className: "w-20 px-1 py-1 border border-gray-300 rounded text-right"
                 })),
               React.createElement("td", { className: "px-2 py-1 text-gray-400 text-[11px] whitespace-nowrap" },
-                d.planLine + " / " + d.planName));
+                d.already ? React.createElement("span", {
+                  className: "px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded font-bold mr-1"
+                }, "입력됨") : null, d.planLine + " / " + d.planName),
+              React.createElement("td", { className: "px-1 py-1 text-center" },
+                React.createElement("button", {
+                  type: "button",
+                  title: "이 줄 제거",
+                  onClick: () => setPlanDraft(prev => prev.filter(x => x.key !== d.key)),
+                  className: "w-6 h-6 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 font-bold"
+                }, "\u00D7")));
           })))),
       React.createElement("div", {
         className: "px-4 py-2 bg-gray-50 text-[11px] text-gray-500 border-t"
-      }, "노란 줄은 등록된 아이템과 자동 매칭되지 않은 계획입니다. 라인·아이템을 직접 선택하세요. 인원은 비어 있으니 입력해야 저장됩니다.")) : null,
+      }, "\uCD08\uB85D\uC904 = \uC774\uBBF8 \uC785\uB825\uB41C \uACC4\uD68D(\uC790\uB3D9 \uC81C\uC678) \u00B7 \uB178\uB780\uC904 = \uC790\uB3D9 \uB9E4\uCE6D \uC548 \uB428, \uB77C\uC778\u00B7\uC544\uC774\uD15C \uC9C1\uC811 \uC120\uD0DD \u00B7 \uC778\uC6D0\uC740 \uC785\uB825\uD574\uC57C \uC800\uC7A5\uB429\uB2C8\uB2E4")) : null,
     React.createElement("div", {
     className: "grid grid-cols-12 gap-3 items-end"
   }, React.createElement("div", {
