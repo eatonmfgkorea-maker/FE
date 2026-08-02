@@ -134,7 +134,7 @@
     div.innerHTML =
       '<div style="background:#0f172a;border:1px solid rgba(255,255,255,0.1);border-radius:1rem;padding:2rem;width:100%;max-width:26rem;box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);text-align:center;">' +
         '<div style="display:inline-flex;align-items:center;justify-content:center;width:3.5rem;height:3.5rem;border-radius:1rem;background:rgba(59,130,246,0.2);border:1px solid rgba(96,165,250,0.3);margin-bottom:1rem;">' +
-          '<svg style="width:1.75rem;height:1.75rem;color:#60a5fa;" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>' +
+          '<svg style="width:1.75rem;height:1.75rem;color:#60a5fa;" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.76a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>' +
         '</div>' +
         '<h2 style="font-size:1.35rem;font-weight:bold;color:#fff;margin:0;">' + APP_NAME + '</h2>' +
         '<p style="font-size:0.85rem;color:#94a3b8;margin:0.5rem 0 1.5rem;">승인된 구글 계정으로 로그인하세요</p>' +
@@ -2371,6 +2371,242 @@ function MFGProductionApp() {
   const [pendingDowntime, setPendingDowntime] = useState(null);
   const [downtimeConfirmList, setDowntimeConfirmList] = useState([]);
   const [duplicateWorkers, setDuplicateWorkers] = useState([]);
+  // ===== 생산계획 불러오기 (드라이브의 FE 계획 엑셀에서 그날 계획을 읽어 입력 초안 생성) =====
+  const [planPickDate, setPlanPickDate] = useState(new Date().toISOString().split('T')[0]);
+  const [planDraft, setPlanDraft] = useState(null);      // 불러온 초안 행 배열
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planMsg, setPlanMsg] = useState('');
+
+  const __normPno = s => String(s || '').toUpperCase().replace(/[\s\-_./]/g, '');
+  const __normLine = s => String(s || '').toUpperCase().replace(/[\s\-_./]/g, '');
+  const __serialToDate = v => {
+    if (typeof v === 'number' && v > 40000) {
+      try {
+        const d = XLSX.SSF.parse_date_code(v);
+        if (d) return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
+      } catch (e) {}
+    }
+    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    return null;
+  };
+  const __cell = (ws, r, c) => {
+    const x = ws[XLSX.utils.encode_cell({ r, c })];
+    return x ? x.v : undefined;
+  };
+
+  // 계획검토 시트 → [{date, shift, line, pname, pno, qty}]
+  const __parsePlanRows = wb => {
+    const ws = wb.Sheets['계획검토'];
+    if (!ws || !ws['!ref']) return [];
+    const rg = XLSX.utils.decode_range(ws['!ref']);
+    const dateCols = {};
+    for (let c = 13; c <= rg.e.c; c++) {
+      const ds = __serialToDate(__cell(ws, 4, c));
+      if (ds) dateCols[c] = ds;
+    }
+    const out = [];
+    for (let r = 5; r <= rg.e.r; r++) {
+      const g2 = String(__cell(ws, r, 11) || '').trim();
+      let shift = null;
+      if (g2 === '주간계획') shift = '주간';
+      else if (g2 === '야간계획') shift = '야간';
+      else continue;
+      const pno = String(__cell(ws, r, 8) || '').trim();
+      if (!pno) continue;
+      const pname = String(__cell(ws, r, 7) || '').trim();
+      const line = String(__cell(ws, r, 6) || '').trim();
+      Object.keys(dateCols).forEach(c => {
+        const q = __cell(ws, r, parseInt(c));
+        if (typeof q === 'number' && q > 0) {
+          out.push({ date: dateCols[c], shift, line, pname, pno, qty: Math.round(q) });
+        }
+      });
+    }
+    return out;
+  };
+
+  // 모품목 / 오라클 바코드출력용 → LOT 계산용 맵
+  const __extractLotMaps = wb => {
+    const revMap = {}, lineCodes = {};
+    try {
+      const wsM = wb.Sheets['모품목'];
+      if (wsM && wsM['!ref']) {
+        const rg = XLSX.utils.decode_range(wsM['!ref']);
+        for (let r = 2; r <= rg.e.r; r++) {
+          const i = __cell(wsM, r, 8), j = __cell(wsM, r, 9);
+          if (i != null && j != null && String(i).trim() && String(j).trim()) {
+            const pk = __normPno(i), val = String(j).trim(), ph = /^0+$/.test(val);
+            if (!(pk in revMap) || (/^0+$/.test(revMap[pk]) && !ph)) revMap[pk] = val;
+          }
+        }
+      }
+      const wsB = wb.Sheets['오라클 바코드출력용'];
+      if (wsB && wsB['!ref']) {
+        for (let r = 3; r <= 20; r++) {
+          const a = __cell(wsB, r, 0), b = __cell(wsB, r, 1);
+          if (a != null && b != null && String(a).trim() && String(b).trim()) lineCodes[__normLine(a)] = String(b).trim();
+        }
+      }
+    } catch (e) {}
+    return { revMap, lineCodes };
+  };
+
+  // LOT = REV + 라인코드 + YYMMDD + (주간 A / 야간 B) + 당일 같은 라인 품목 순번
+  const __calcLot = (allRows, maps, t) => {
+    const lc = (maps.lineCodes || {})[__normLine(t.line)] || '';
+    if (!lc) return '';
+    const rev = (maps.revMap || {})[__normPno(t.pno)] || '';
+    const ymd = String(t.date).slice(2, 10).replace(/-/g, '');
+    const sc = t.shift === '야간' ? 'B' : 'A';
+    let seq = 0;
+    const seen = new Set();
+    for (const r of allRows) {
+      if (r.date !== t.date || r.shift !== t.shift) continue;
+      if (((maps.lineCodes || {})[__normLine(r.line)] || '') !== lc) continue;
+      const k = __normPno(r.pno);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      if (k === __normPno(t.pno)) { seq = seen.size; break; }
+    }
+    if (!seq) seq = 1;
+    return rev + lc + ymd + sc + seq;
+  };
+
+  const loadPlanForDate = async () => {
+    if (!planPickDate) { setPlanMsg('날짜를 선택하세요.'); return; }
+    if (typeof XLSX === 'undefined') { setPlanMsg('엑셀 모듈 로딩 중입니다. 잠시 후 다시 시도하세요.'); return; }
+    setPlanLoading(true);
+    setPlanMsg('생산계획을 불러오는 중...');
+    setPlanDraft(null);
+    try {
+      const listRes = await fetch(GAS_URL + '?action=list&_=' + Date.now());
+      const list = await listRes.json();
+      const files = (list.files || [])
+        .filter(f => (f.name || '').indexOf('plan-xlsx-02.FE') === 0)
+        .sort((a, b) => (b.name || '').localeCompare(a.name || ''));
+      if (!files.length) { setPlanMsg('공유저장소에 FE 생산계획 파일이 없습니다.'); setPlanLoading(false); return; }
+
+      // 월별 파일이 나뉘어 있으므로 최근 2개를 확인해 해당 날짜가 들어있는 파일을 사용
+      let rows = [], maps = { revMap: {}, lineCodes: {} }, found = false;
+      for (const target of files.slice(0, 2)) {
+        const j = await (await fetch(GAS_URL + '?action=load&id=' + encodeURIComponent(target.id) + '&_=' + Date.now())).json();
+        const d = j.data || {};
+        const b64 = d.xlsxB64 || (d.data && d.data.xlsxB64);
+        if (!b64) continue;
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const wb = XLSX.read(bytes, { cellDates: false, cellFormula: false, sheets: ['계획검토', '모품목', '오라클 바코드출력용'] });
+        const rs = __parsePlanRows(wb);
+        if (rs.some(r => r.date === planPickDate)) {
+          rows = rs; maps = __extractLotMaps(wb); found = true; break;
+        }
+        if (!rows.length) { rows = rs; maps = __extractLotMaps(wb); }
+      }
+
+      // «New ICV / Old ICV» 로 합쳐진 계획은 라인코드가 없어 두 라인으로 분리한다
+      const splitIcv = list => {
+        const out = [];
+        list.forEach(r => {
+          if (/NEWICV.*OLDICV|OLDICV.*NEWICV/.test(__normLine(r.line))) {
+            out.push({ ...r, line: 'New ICV' });
+            out.push({ ...r, line: 'Old ICV' });
+          } else out.push(r);
+        });
+        return out;
+      };
+      rows = splitIcv(rows);
+      const dayRows = rows.filter(r => r.date === planPickDate);
+      if (!dayRows.length) {
+        setPlanMsg(planPickDate + ' 에 해당하는 생산계획이 없습니다.' + (found ? '' : ' (계획 파일에 해당 월이 없을 수 있습니다)'));
+        setPlanLoading(false);
+        return;
+      }
+
+      // 등록된 아이템과 매칭 (품번 → 라인/아이템)
+      const secItems = (settings[activeSection] && settings[activeSection].items) || [];
+      const draft = dayRows.map((r, idx) => {
+        const cands = secItems.filter(it => (it.partNos || []).some(p => __normPno(p) === __normPno(r.pno)));
+        let lineName = '', item = '', partNo = r.pno, partOptions = [];
+        if (cands.length === 1) {
+          lineName = cands[0].lineName || '';
+          item = cands[0].item || '';
+          partOptions = cands[0].partNos || [];
+        } else if (cands.length > 1) {
+          partOptions = [];   // 여러 개면 비워서 직접 선택
+        }
+        return {
+          key: 'p' + idx,
+          use: cands.length === 1,
+          productionDate: planPickDate,
+          lineName, item, partNo, partOptions,
+          planLine: r.line, planName: r.pname,
+          lotNo: __calcLot(rows, maps, { date: r.date, shift: r.shift, line: r.line, pno: r.pno }),
+          shift: r.shift,
+          workers: '',
+          goodQuantity: String(r.qty),
+          matched: cands.length === 1,
+          ambiguous: cands.length > 1
+        };
+      });
+      setPlanDraft(draft);
+      const okN = draft.filter(d => d.matched).length;
+      setPlanMsg(`계획 ${draft.length}건 · 자동 매칭 ${okN}건` + (draft.length - okN ? ` · 확인 필요 ${draft.length - okN}건` : ''));
+    } catch (e) {
+      setPlanMsg('불러오기 실패: ' + (e.message || e));
+    }
+    setPlanLoading(false);
+  };
+
+  const updateDraft = (key, field, value) => {
+    setPlanDraft(prev => prev.map(d => {
+      if (d.key !== key) return d;
+      const next = { ...d, [field]: value };
+      if (field === 'lineName') {
+        next.item = '';
+        next.partNo = '';
+        next.partOptions = [];
+      }
+      if (field === 'item') {
+        const secItems = (settings[activeSection] && settings[activeSection].items) || [];
+        const found = secItems.find(it => it.lineName === next.lineName && it.item === value);
+        next.partOptions = found ? (found.partNos || []) : [];
+        next.partNo = next.partOptions.length === 1 ? next.partOptions[0] : '';
+      }
+      return next;
+    }));
+  };
+
+  const saveDraftLogs = () => {
+    const rows = (planDraft || []).filter(d => d.use);
+    if (!rows.length) { setPlanMsg('선택된 행이 없습니다.'); return; }
+    const bad = rows.filter(d => !d.lineName || !d.item || !d.partNo || !d.workers || !d.goodQuantity);
+    if (bad.length) { setPlanMsg(`입력이 비어 있는 행이 ${bad.length}건 있습니다. (라인·아이템·품번·인원·수량 확인)`); return; }
+    const now = Date.now();
+    const logs = rows.map((d, i) => ({
+      productionDate: d.productionDate,
+      lineName: d.lineName,
+      item: d.item,
+      partNo: d.partNo,
+      lotNo: d.lotNo || '',
+      shift: d.shift,
+      workers: d.workers,
+      selectedWorkers: [],
+      goodQuantity: d.goodQuantity,
+      time: '1',
+      startTime: d.shift === '야간' ? '20:30' : '08:30',
+      endTime: d.shift === '야간' ? '05:30' : '17:30',
+      esCount: '',
+      deviationCount: '',
+      section: activeSection,
+      id: now + i,
+      createdAt: new Date().toLocaleString('ko-KR')
+    }));
+    setProductionLogs(prev => [...logs.slice().reverse(), ...prev]);
+    setPlanDraft(null);
+    setPlanMsg(`${logs.length}건이 생산일지에 추가되었습니다. 시간·인원은 목록에서 수정하세요.`);
+  };
+
   const handleSubmit = () => {
     if (!formData.lineName || !formData.item || !formData.partNo || !formData.lotNo || !formData.workers || !formData.goodQuantity || !formData.startTime || !formData.endTime) {
       setFormError('모든 필드를 입력해주세요.');
@@ -3934,9 +4170,122 @@ function MFGProductionApp() {
     className: "flex-1 p-6 overflow-auto"
   }, activeTab === 'production' && React.createElement("div", {
     className: "bg-white rounded-xl shadow-lg p-6"
+  }, React.createElement("div", {
+    className: "flex items-center justify-between flex-wrap gap-3 mb-4"
   }, React.createElement("h2", {
-    className: "text-xl font-bold text-gray-800 mb-6"
+    className: "text-xl font-bold text-gray-800"
   }, "생산일지 입력"), React.createElement("div", {
+    className: "flex items-center gap-2"
+  }, React.createElement("input", {
+    type: "date",
+    value: planPickDate,
+    onChange: e => setPlanPickDate(e.target.value),
+    className: "px-2 py-2 border border-gray-300 rounded-lg text-sm"
+  }), React.createElement("button", {
+    type: "button",
+    onClick: loadPlanForDate,
+    disabled: planLoading,
+    className: "px-4 py-2 rounded-lg text-sm font-bold text-white " + (planLoading ? "bg-gray-400" : "bg-indigo-600 hover:bg-indigo-700")
+  }, planLoading ? "불러오는 중..." : "📋 생산계획 불러오기"))),
+    planMsg ? React.createElement("div", {
+      className: "mb-3 px-3 py-2 rounded-lg text-sm " + (planMsg.indexOf("실패") >= 0 || planMsg.indexOf("없습니다") >= 0 ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700")
+    }, planMsg) : null,
+    planDraft ? React.createElement("div", {
+      className: "mb-5 border-2 border-indigo-200 rounded-xl overflow-hidden"
+    }, React.createElement("div", {
+      className: "bg-indigo-50 px-4 py-2 flex items-center justify-between flex-wrap gap-2"
+    }, React.createElement("div", {
+      className: "font-bold text-indigo-800 text-sm"
+    }, planPickDate + " 생산계획 (" + planDraft.filter(d => d.use).length + "/" + planDraft.length + "건 선택)"),
+      React.createElement("div", { className: "flex gap-2" },
+        React.createElement("button", {
+          type: "button",
+          onClick: () => setPlanDraft(prev => prev.map(d => ({ ...d, use: true }))),
+          className: "px-3 py-1.5 bg-white border border-indigo-300 text-indigo-700 rounded-lg text-xs font-bold"
+        }, "전체 선택"),
+        React.createElement("button", {
+          type: "button",
+          onClick: () => setPlanDraft(null),
+          className: "px-3 py-1.5 bg-white border border-gray-300 text-gray-600 rounded-lg text-xs font-bold"
+        }, "닫기"),
+        React.createElement("button", {
+          type: "button",
+          onClick: saveDraftLogs,
+          className: "px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold"
+        }, "선택 항목 저장"))),
+      React.createElement("div", { className: "overflow-x-auto max-h-96" },
+        React.createElement("table", { className: "w-full text-xs" },
+          React.createElement("thead", { className: "bg-gray-50 sticky top-0" },
+            React.createElement("tr", null, ["", "주야", "라인명", "아이템", "Part No", "Lot No", "인원", "양품수량", "계획"].map(h =>
+              React.createElement("th", { key: h, className: "px-2 py-2 font-bold text-gray-600 whitespace-nowrap border-b" }, h)))),
+          React.createElement("tbody", null, planDraft.map(d => {
+            const secItems = (settings[activeSection] && settings[activeSection].items) || [];
+            const lineOpts = [...new Set(secItems.map(it => it.lineName))].filter(Boolean).sort();
+            const itemOpts = secItems.filter(it => it.lineName === d.lineName).map(it => it.item);
+            return React.createElement("tr", {
+              key: d.key,
+              className: "border-b " + (d.use ? (d.matched ? "" : "bg-amber-50") : "opacity-40 bg-gray-50")
+            }, React.createElement("td", { className: "px-2 py-1 text-center" },
+              React.createElement("input", {
+                type: "checkbox", checked: d.use,
+                onChange: e => updateDraft(d.key, 'use', e.target.checked)
+              })),
+              React.createElement("td", { className: "px-2 py-1 text-center whitespace-nowrap" },
+                React.createElement("span", {
+                  className: "px-2 py-0.5 rounded text-[11px] font-bold " + (d.shift === '야간' ? "bg-slate-700 text-white" : "bg-amber-100 text-amber-800")
+                }, d.shift)),
+              React.createElement("td", { className: "px-2 py-1" },
+                React.createElement("select", {
+                  value: d.lineName,
+                  onChange: e => updateDraft(d.key, 'lineName', e.target.value),
+                  className: "w-full px-1 py-1 border rounded " + (d.lineName ? "border-gray-300" : "border-red-300 bg-red-50")
+                }, React.createElement("option", { value: "" }, "선택"),
+                   lineOpts.map(l => React.createElement("option", { key: l, value: l }, l)))),
+              React.createElement("td", { className: "px-2 py-1" },
+                React.createElement("select", {
+                  value: d.item,
+                  onChange: e => updateDraft(d.key, 'item', e.target.value),
+                  className: "w-full px-1 py-1 border rounded " + (d.item ? "border-gray-300" : "border-red-300 bg-red-50")
+                }, React.createElement("option", { value: "" }, "선택"),
+                   itemOpts.map(it => React.createElement("option", { key: it, value: it }, it)))),
+              React.createElement("td", { className: "px-2 py-1" },
+                (d.partOptions && d.partOptions.length > 1)
+                  ? React.createElement("select", {
+                      value: d.partNo,
+                      onChange: e => updateDraft(d.key, 'partNo', e.target.value),
+                      className: "w-full px-1 py-1 border rounded " + (d.partNo ? "border-gray-300" : "border-red-300 bg-red-50")
+                    }, React.createElement("option", { value: "" }, "선택"),
+                       d.partOptions.map(pn => React.createElement("option", { key: pn, value: pn }, pn)))
+                  : React.createElement("input", {
+                      type: "text", value: d.partNo,
+                      onChange: e => updateDraft(d.key, 'partNo', e.target.value),
+                      className: "w-full px-1 py-1 border border-gray-300 rounded"
+                    })),
+              React.createElement("td", { className: "px-2 py-1" },
+                React.createElement("input", {
+                  type: "text", value: d.lotNo,
+                  onChange: e => updateDraft(d.key, 'lotNo', e.target.value),
+                  className: "w-full px-1 py-1 border border-gray-300 rounded font-mono text-[11px]"
+                })),
+              React.createElement("td", { className: "px-2 py-1" },
+                React.createElement("input", {
+                  type: "number", value: d.workers, placeholder: "-",
+                  onChange: e => updateDraft(d.key, 'workers', e.target.value),
+                  className: "w-16 px-1 py-1 border rounded text-right " + (d.workers ? "border-gray-300" : "border-red-300 bg-red-50")
+                })),
+              React.createElement("td", { className: "px-2 py-1" },
+                React.createElement("input", {
+                  type: "number", value: d.goodQuantity,
+                  onChange: e => updateDraft(d.key, 'goodQuantity', e.target.value),
+                  className: "w-20 px-1 py-1 border border-gray-300 rounded text-right"
+                })),
+              React.createElement("td", { className: "px-2 py-1 text-gray-400 text-[11px] whitespace-nowrap" },
+                d.planLine + " / " + d.planName));
+          })))),
+      React.createElement("div", {
+        className: "px-4 py-2 bg-gray-50 text-[11px] text-gray-500 border-t"
+      }, "노란 줄은 등록된 아이템과 자동 매칭되지 않은 계획입니다. 라인·아이템을 직접 선택하세요. 인원은 비어 있으니 입력해야 저장됩니다.")) : null,
+    React.createElement("div", {
     className: "grid grid-cols-12 gap-3 items-end"
   }, React.createElement("div", {
     className: "col-span-1"
