@@ -455,7 +455,8 @@ function MFGProductionApp() {
     startTime: '',
     endTime: '',
     content: '',
-    isEtc: false
+    isEtc: false,
+    dtGoodQty: ''
   });
   const [defectLogs, setDefectLogs] = useState([]);
   const [defectForm, setDefectForm] = useState({
@@ -3288,6 +3289,9 @@ function MFGProductionApp() {
     }
     return null;
   };
+  // V076: 아래 비가동 유형은 «양품수량»을 함께 기록한다 (추후 OEE 산식 개선 시 사용)
+  const DT_QTY_TYPES = ['Rework', 'Retest'];
+  const needsDtQty = name => DT_QTY_TYPES.some(t => String(name || '').trim().toLowerCase() === t.toLowerCase());
   const handleDowntimeSubmit = () => {
     if (!selectedLogId) {
       setFormError('생산일지를 먼저 선택해주세요.');
@@ -3330,17 +3334,20 @@ function MFGProductionApp() {
       }
     }
     const selectedType = settings.common.downtimeTypes.find(t => t.name === downtimeForm.downtimeType);
+    // V076: 수량 대상 유형이 아니면 값을 남기지 않는다
+    const dtFormNorm = { ...downtimeForm,
+      dtGoodQty: needsDtQty(downtimeForm.downtimeType) ? String(downtimeForm.dtGoodQty ?? '').trim() : '' };
     if (editingDowntimeId) {
       setDowntimeLogs(prev => prev.map(d => d.id === editingDowntimeId ? {
         ...d,
-        ...downtimeForm,
+        ...dtFormNorm,
         downtimeCategory: selectedType?.category || '비가동',
         updatedAt: new Date().toLocaleString('ko-KR')
       } : d));
       setEditingDowntimeId(null);
     } else {
       const newDowntime = {
-        ...downtimeForm,
+        ...dtFormNorm,
         downtimeCategory: selectedType?.category || '비가동',
         productionLogId: selectedLogId,
         id: Date.now(),
@@ -3357,7 +3364,8 @@ function MFGProductionApp() {
       startTime: '',
       endTime: '',
       content: '',
-      isEtc: false
+      isEtc: false,
+      dtGoodQty: ''
     });
   };
   const confirmAddDowntime = () => {
@@ -3370,7 +3378,8 @@ function MFGProductionApp() {
       startTime: '',
       endTime: '',
       content: '',
-      isEtc: false
+      isEtc: false,
+      dtGoodQty: ''
     });
   };
   const startEditDowntime = log => {
@@ -3379,7 +3388,8 @@ function MFGProductionApp() {
       startTime: log.startTime || '',
       endTime: log.endTime || '',
       content: log.content || '',
-      isEtc: log.isEtc || false
+      isEtc: log.isEtc || false,
+      dtGoodQty: log.dtGoodQty ?? ''
     });
     setEditingDowntimeId(log.id);
   };
@@ -3390,7 +3400,8 @@ function MFGProductionApp() {
       startTime: '',
       endTime: '',
       content: '',
-      isEtc: false
+      isEtc: false,
+      dtGoodQty: ''
     });
   };
   const getBomListForSelectedLog = () => {
@@ -3869,7 +3880,7 @@ function MFGProductionApp() {
       className: "text-gray-500"
     }, "데이터를 불러오는 중... ", React.createElement("span", {
       className: "text-xs font-mono text-gray-400"
-    }, "V075"))));
+    }, "V076"))));
   }
   return React.createElement("div", {
     className: "w-full h-screen bg-gray-100 flex flex-col",
@@ -3917,7 +3928,7 @@ function MFGProductionApp() {
     className: "text-2xl font-bold"
   }, "FE 생산관리 시스템"), React.createElement("span", {
     className: "ml-2 px-2 py-0.5 bg-white/20 rounded text-xs font-mono font-bold align-middle"
-  }, "V075")), React.createElement("div", {
+  }, "V076")), React.createElement("div", {
     className: "text-right"
   }, React.createElement("div", {
     className: "text-sm opacity-80"
@@ -5475,7 +5486,11 @@ function MFGProductionApp() {
     return React.createElement("div", {
       key: i,
       className: `text-lg ${isNew ? 'font-bold text-violet-700' : 'text-gray-600'}`
-    }, d.downtimeType, d.content ? ' ' + d.content : '', " ", mins > 0 ? mins + '분' : '(시간미입력)', isNew && React.createElement("span", {
+    }, d.downtimeType, d.content ? ' ' + d.content : '', " ", mins > 0 ? mins + '분' : '(시간미입력)',
+      needsDtQty(d.downtimeType) && String(d.dtGoodQty ?? '').trim() !== '' && React.createElement("span", {
+        className: "text-base text-emerald-700 ml-2"
+      }, "· 양품 ", Number(d.dtGoodQty).toLocaleString(), "개"),
+      isNew && React.createElement("span", {
       className: "text-sm text-violet-500 ml-2"
     }, "← 신규"));
   })), React.createElement("div", {
@@ -8187,7 +8202,24 @@ function MFGProductionApp() {
     className: "p-3 bg-orange-50 rounded-lg text-sm text-orange-700"
   }, "ℹ️ 기타 모드: 시간 없이 내용만 입력합니다"), !downtimeForm.isEtc && downtimeForm.startTime && downtimeForm.endTime && getTimeValidationError(downtimeForm.startTime, downtimeForm.endTime) && React.createElement("div", {
     className: "text-red-500 text-xs bg-red-50 p-2 rounded"
-  }, "⚠️ ", getTimeValidationError(downtimeForm.startTime, downtimeForm.endTime)), React.createElement("div", null, React.createElement("label", {
+  }, "⚠️ ", getTimeValidationError(downtimeForm.startTime, downtimeForm.endTime)), needsDtQty(downtimeForm.downtimeType) && React.createElement("div", {
+    className: "border border-emerald-200 rounded-lg p-3 bg-emerald-50"
+  }, React.createElement("label", {
+    className: "block text-sm font-semibold text-emerald-800 mb-1"
+  }, downtimeForm.downtimeType, " 양품수량"), React.createElement("input", {
+    type: "number",
+    min: "0",
+    inputMode: "numeric",
+    value: downtimeForm.dtGoodQty ?? '',
+    onChange: e => setDowntimeForm(prev => ({
+      ...prev,
+      dtGoodQty: e.target.value
+    })),
+    className: "w-full px-3 py-2 border border-emerald-300 rounded-lg text-sm bg-white",
+    placeholder: "예: 25"
+  }), React.createElement("p", {
+    className: "text-xs text-emerald-700 mt-1"
+  }, "이 시간 동안 재작업으로 살려낸 양품 수량입니다. (생산일지 양품수량과 별개로 기록)")), React.createElement("div", null, React.createElement("label", {
     className: "block text-sm font-medium text-gray-600 mb-1"
   }, "비가동 내용"), React.createElement("textarea", {
     value: downtimeForm.content,
@@ -8257,8 +8289,10 @@ function MFGProductionApp() {
     className: "px-3 py-2 text-left text-xs font-semibold text-gray-600 border-b"
   }, "내용"), React.createElement("th", {
     className: "px-3 py-2 text-center text-xs font-semibold text-gray-600 border-b"
+  }, "양품수량"), React.createElement("th", {
+    className: "px-3 py-2 text-center text-xs font-semibold text-gray-600 border-b"
   }, "관리"))), React.createElement("tbody", null, downtimeLogs.filter(d => d.productionLogId === selectedLogId).length === 0 ? React.createElement("tr", null, React.createElement("td", {
-    colSpan: "6",
+    colSpan: "7",
     className: "px-4 py-6 text-center text-gray-400"
   }, "등록된 비가동 내역이 없습니다.")) : [...downtimeLogs.filter(d => d.productionLogId === selectedLogId)].sort((a, b) => {
     const toMin = t => {
@@ -8285,6 +8319,14 @@ function MFGProductionApp() {
   }, log.endTime), React.createElement("td", {
     className: "px-3 py-2 text-sm border-b"
   }, log.content), React.createElement("td", {
+    className: "px-3 py-2 text-sm border-b text-center"
+  }, needsDtQty(log.downtimeType) ? (String(log.dtGoodQty ?? '').trim() !== '' ? React.createElement("span", {
+    className: "px-2 py-1 bg-emerald-100 text-emerald-800 rounded text-xs font-semibold"
+  }, Number(log.dtGoodQty).toLocaleString()) : React.createElement("span", {
+    className: "text-xs text-amber-600"
+  }, "미입력")) : React.createElement("span", {
+    className: "text-gray-300"
+  }, "-")), React.createElement("td", {
     className: "px-3 py-2 text-sm border-b text-center"
   }, React.createElement("button", {
     type: "button",
@@ -13195,7 +13237,7 @@ function MFGProductionApp() {
         wch: 15
       }));
       XLSX.utils.book_append_sheet(wb, prodWs, '생산일지');
-      const downHeaders = ['생산일지ID', '구분(계획/비가동)', '비가동유형', '시작시간', '종료시간', '내용'];
+      const downHeaders = ['생산일지ID', '구분(계획/비가동)', '비가동유형', '시작시간', '종료시간', '내용', '양품수량(Rework/Retest만)'];
       const downData = [downHeaders];
       const downWs = XLSX.utils.aoa_to_sheet(downData);
       downWs['!cols'] = downHeaders.map(() => ({
@@ -13360,8 +13402,10 @@ function MFGProductionApp() {
                 downtimeType: String(row[idx + 2] || ''),
                 startTime: String(row[idx + 3] || ''),
                 endTime: String(row[idx + 4] || ''),
-                content: String(row[idx + 5] || '')
+                content: String(row[idx + 5] || ''),
+                dtGoodQty: String(row[idx + 6] ?? '').trim()
               };
+              if (!needsDtQty(newLog.downtimeType)) newLog.dtGoodQty = '';
               if (newLog.downtimeType) {
                 setDowntimeLogs(prev => [...prev, newLog]);
                 importedDown++;
