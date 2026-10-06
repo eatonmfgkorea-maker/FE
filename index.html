@@ -3880,7 +3880,7 @@ function MFGProductionApp() {
       className: "text-gray-500"
     }, "데이터를 불러오는 중... ", React.createElement("span", {
       className: "text-xs font-mono text-gray-400"
-    }, "V076"))));
+    }, "V077"))));
   }
   return React.createElement("div", {
     className: "w-full h-screen bg-gray-100 flex flex-col",
@@ -3928,7 +3928,7 @@ function MFGProductionApp() {
     className: "text-2xl font-bold"
   }, "FE 생산관리 시스템"), React.createElement("span", {
     className: "ml-2 px-2 py-0.5 bg-white/20 rounded text-xs font-mono font-bold align-middle"
-  }, "V076")), React.createElement("div", {
+  }, "V077")), React.createElement("div", {
     className: "text-right"
   }, React.createElement("div", {
     className: "text-sm opacity-80"
@@ -8150,7 +8150,8 @@ function MFGProductionApp() {
     onChange: e => setDowntimeForm(prev => ({
       ...prev,
       downtimeType: e.target.value,
-      content: e.target.value || prev.content
+      // Rework·Retest 는 «1차 Rework» / «1차 Retest» 로 자동 입력
+      content: e.target.value ? (needsDtQty(e.target.value) ? '1차 ' + e.target.value : e.target.value) : prev.content
     })),
     className: "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
   }, React.createElement("option", {
