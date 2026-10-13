@@ -3990,7 +3990,9 @@ function MFGProductionApp() {
     const __newQty = Number(defectForm.quantity) || 0;
     const __partKey = (defectForm.selectedBoms || []).slice().sort().join('|');
     const __existSum = defectLogs.filter(d => d.id !== editingDefectId && d.productionLogId === selectedLogId && d.defectType === defectForm.defectType && (d.selectedBoms || []).slice().sort().join('|') === __partKey).reduce((s, d) => s + (Number(d.quantity) || 0), 0);
-    if (__goodQty > 0 && __existSum + __newQty > __goodQty) {
+    // V079: FTIV(Rework) 아이템은 불량품을 재작업하는 생산이라 양품수량 초과 제한을 두지 않음
+    const __noQtyLimit = String(selectedLog?.item || '').replace(/\s/g, '').toLowerCase() === 'ftiv(rework)';
+    if (!__noQtyLimit && __goodQty > 0 && __existSum + __newQty > __goodQty) {
       setFormError(`불량 수량이 생산수량을 초과합니다.\n생산수량: ${__goodQty}개\n같은 종류+Part 합계: 기존 ${__existSum} + 신규 ${__newQty} = ${__existSum + __newQty}개\n\n불량종류나 Part(BOM)가 다르면 별도로 입력 가능합니다.`);
       return;
     }
@@ -4082,7 +4084,8 @@ function MFGProductionApp() {
     const __goodQtyR = Number(selectedLog?.goodQuantity) || 0;
     const __newQtyR = Number(reworkForm.quantity) || 0;
     const __existSumR = reworkLogs.filter(r => r.id !== editingReworkId && r.productionLogId === selectedLogId && r.reworkType === reworkForm.reworkType).reduce((s, r) => s + (Number(r.quantity) || 0), 0);
-    if (__goodQtyR > 0 && __existSumR + __newQtyR > __goodQtyR) {
+    const __noQtyLimitR = String(selectedLog?.item || '').replace(/\s/g, '').toLowerCase() === 'ftiv(rework)';
+    if (!__noQtyLimitR && __goodQtyR > 0 && __existSumR + __newQtyR > __goodQtyR) {
       setFormError(`재작업 수량이 생산수량을 초과합니다.\n생산수량: ${__goodQtyR}개\n같은 종류 합계: 기존 ${__existSumR} + 신규 ${__newQtyR} = ${__existSumR + __newQtyR}개\n\n재작업종류가 다르면 별도로 입력 가능합니다.`);
       return;
     }
@@ -4395,7 +4398,7 @@ function MFGProductionApp() {
       className: "text-gray-500"
     }, "데이터를 불러오는 중... ", React.createElement("span", {
       className: "text-xs font-mono text-gray-400"
-    }, "V078"))));
+    }, "V079"))));
   }
   return React.createElement("div", {
     className: "w-full h-screen bg-gray-100 flex flex-col",
@@ -4443,7 +4446,7 @@ function MFGProductionApp() {
     className: "text-2xl font-bold"
   }, "FE 생산관리 시스템"), React.createElement("span", {
     className: "ml-2 px-2 py-0.5 bg-white/20 rounded text-xs font-mono font-bold align-middle"
-  }, "V078")), React.createElement("div", {
+  }, "V079")), React.createElement("div", {
     className: "text-right"
   }, React.createElement("div", {
     className: "text-sm opacity-80"
